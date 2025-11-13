@@ -1,13 +1,21 @@
 ---
-# Example playbook for using the CLS role
+# Example playbook for using Neuron roles
 # Usage: ansible-playbook -i inventory.yml example-playbook.yml
+#
+# This playbook demonstrates manual role inclusion.
+# For automatic role detection, use playbooks/deploy.yml instead.
 
-- name: Deploy CLS Java Application
-  hosts: app_servers
+- name: Deploy Neuron Application
+  hosts: all
   become: yes
   roles:
+    # Artifact role - fetches and extracts artifacts from local or Nexus
+    - role: artifact
+      when: >
+        (artifact_source.type == 'local' and artifact_source.local.domain is defined and artifact_source.local.app_name is defined) or
+        (artifact_source.type == 'nexus' and artifact_source.nexus.url is defined and artifact_source.nexus.group_id is defined and artifact_source.nexus.artifact_id is defined)
+    
+    # CLS role - sets up lifecycle management
     - role: cls
-      vars:
-        instance_id: "{{ instance_id | default('default-app') }}"
-        release_version: "{{ release_version | default('1.0.0') }}"
+      when: neuron_features.cls is defined and neuron_features.cls | bool
 

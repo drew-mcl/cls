@@ -1,0 +1,18 @@
+---
+namespace: neuron
+name: cls
+version: 1.0.0
+readme: README.md
+authors:
+  - Neuron Team
+description: Ansible collection for Neuron application deployment and lifecycle management
+license:
+  - MIT
+tags:
+  - deployment
+  - lifecycle
+  - java
+  - artifacts
+dependencies: {}
+collections: []
+

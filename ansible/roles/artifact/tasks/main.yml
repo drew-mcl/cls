@@ -1,0 +1,190 @@
+---
+# Main tasks for artifact role
+# This role fetches and extracts artifacts from various sources (local/runner or Nexus)
+
+- name: Validate artifact source configuration
+  fail:
+    msg: "artifact_source.type must be 'local' or 'nexus'"
+  when: artifact_source.type not in ['local', 'nexus']
+
+- name: Check if artifact fetching is enabled (local)
+  set_fact:
+    artifact_fetch_enabled: "{{ artifact_source.type == 'local' and artifact_source.local.domain is defined and artifact_source.local.domain | length > 0 and artifact_source.local.app_name is defined and artifact_source.local.app_name | length > 0 }}"
+
+- name: Check if artifact fetching is enabled (nexus)
+  set_fact:
+    artifact_fetch_enabled: "{{ artifact_source.type == 'nexus' and artifact_source.nexus.url is defined and artifact_source.nexus.group_id is defined and artifact_source.nexus.artifact_id is defined }}"
+
+- name: Fail if artifact fetching is not properly configured
+  fail:
+    msg: "Artifact source configuration is incomplete. Check artifact_source.{{ artifact_source.type }} settings."
+  when: not artifact_fetch_enabled | default(false)
+
+- name: Fail if required common variables are missing
+  fail:
+    msg: "{{ item }} is required for artifact fetching but not defined"
+  when:
+    - artifact_fetch_enabled | default(false)
+    - item is not defined or item == ""
+  loop:
+    - instance_id
+    - release_version
+
+- name: Set release directory path
+  set_fact:
+    release_dir: "{{ instance_dir }}/release/{{ release_version }}"
+  when: artifact_fetch_enabled | default(false)
+
+- name: Ensure artifact destination directory exists
+  file:
+    path: "{{ artifact_dest }}"
+    state: directory
+    owner: "{{ instance_user | default(ansible_user) }}"
+    group: "{{ instance_group | default(ansible_user) }}"
+    mode: '0755'
+  when: artifact_fetch_enabled | default(false)
+
+# Local/runner artifact fetching
+- name: Set local artifact source path
+  set_fact:
+    artifact_source_path: "{{ artifact_source.local.base_path }}/{{ artifact_source.local.relative_path }}"
+  when:
+    - artifact_fetch_enabled | default(false)
+    - artifact_source.type == 'local'
+
+- name: Find artifact .tgz file locally (local source)
+  find:
+    paths: "{{ artifact_source_path }}"
+    patterns: "*.tgz"
+    recurse: false
+  register: artifact_files
+  when:
+    - artifact_fetch_enabled | default(false)
+    - artifact_source.type == 'local'
+    - ansible_env.CI_PROJECT_DIR is not defined
+  failed_when: false
+  changed_when: false
+  delegate_to: localhost
+  become: false
+
+- name: Find artifact .tgz file in GitLab CI (local source)
+  find:
+    paths: "{{ artifact_source_path }}"
+    patterns: "*.tgz"
+    recurse: false
+  register: artifact_files
+  when:
+    - artifact_fetch_enabled | default(false)
+    - artifact_source.type == 'local'
+    - ansible_env.CI_PROJECT_DIR is defined
+  failed_when: false
+  changed_when: false
+
+- name: Validate local artifact file found
+  fail:
+    msg: "No .tgz artifact found in {{ artifact_source_path }}. Expected: {{ artifact_source.local.domain }}/apps/{{ artifact_source.local.app_name }}/build/distribution/*.tgz"
+  when:
+    - artifact_fetch_enabled | default(false)
+    - artifact_source.type == 'local'
+    - artifact_files.files | default([]) | length == 0
+
+- name: Set local artifact file path
+  set_fact:
+    artifact_file_path: "{{ artifact_files.files | first | combine({}, recursive=True) }}"
+  when:
+    - artifact_fetch_enabled | default(false)
+    - artifact_source.type == 'local'
+    - artifact_files.files | default([]) | length > 0
+
+- name: Copy local artifact to release directory (local execution)
+  copy:
+    src: "{{ artifact_file_path.path }}"
+    dest: "{{ artifact_dest }}/{{ artifact_file_path.path | basename }}"
+    owner: "{{ instance_user | default(ansible_user) }}"
+    group: "{{ instance_group | default(ansible_user) }}"
+    mode: '0644'
+    remote_src: false
+  when:
+    - artifact_fetch_enabled | default(false)
+    - artifact_source.type == 'local'
+    - artifact_file_path is defined
+    - ansible_env.CI_PROJECT_DIR is not defined
+
+- name: Copy local artifact to release directory (GitLab CI)
+  copy:
+    src: "{{ artifact_file_path.path }}"
+    dest: "{{ artifact_dest }}/{{ artifact_file_path.path | basename }}"
+    owner: "{{ instance_user | default(ansible_user) }}"
+    group: "{{ instance_group | default(ansible_user) }}"
+    mode: '0644'
+    remote_src: true
+  when:
+    - artifact_fetch_enabled | default(false)
+    - artifact_source.type == 'local'
+    - artifact_file_path is defined
+    - ansible_env.CI_PROJECT_DIR is defined
+
+- name: Set local artifact filename
+  set_fact:
+    artifact_filename: "{{ artifact_file_path.path | basename }}"
+  when:
+    - artifact_fetch_enabled | default(false)
+    - artifact_source.type == 'local'
+    - artifact_file_path is defined
+
+# Nexus artifact fetching
+- name: Set Nexus artifact version
+  set_fact:
+    nexus_version: "{{ artifact_source.nexus.version | default(release_version) }}"
+  when:
+    - artifact_fetch_enabled | default(false)
+    - artifact_source.type == 'nexus'
+
+- name: Download artifact from Nexus
+  community.general.maven_nexus:
+    url: "{{ artifact_source.nexus.url }}"
+    group_id: "{{ artifact_source.nexus.group_id }}"
+    artifact_id: "{{ artifact_source.nexus.artifact_id }}"
+    version: "{{ nexus_version }}"
+    repository: "{{ artifact_source.nexus.repository }}"
+    username: "{{ artifact_source.nexus.username | default(omit) }}"
+    password: "{{ artifact_source.nexus.password | default(omit) }}"
+    extension: "{{ artifact_source.nexus.extension }}"
+    classifier: "{{ artifact_source.nexus.classifier | default(omit) }}"
+    dest: "{{ artifact_dest }}"
+  register: nexus_download
+  when:
+    - artifact_fetch_enabled | default(false)
+    - artifact_source.type == 'nexus'
+
+- name: Set Nexus artifact filename
+  set_fact:
+    artifact_filename: "{{ nexus_download.file | basename }}"
+  when:
+    - artifact_fetch_enabled | default(false)
+    - artifact_source.type == 'nexus'
+    - nexus_download.file is defined
+
+# Common extraction tasks
+- name: Extract artifact archive
+  unarchive:
+    src: "{{ artifact_dest }}/{{ artifact_filename }}"
+    dest: "{{ release_dir }}"
+    owner: "{{ instance_user | default(ansible_user) }}"
+    group: "{{ instance_group | default(ansible_user) }}"
+    creates: "{{ release_dir }}/.artifact_extracted"
+  when:
+    - artifact_fetch_enabled | default(false)
+    - artifact_filename is defined
+
+- name: Create artifact extraction marker
+  file:
+    path: "{{ release_dir }}/.artifact_extracted"
+    state: touch
+    owner: "{{ instance_user | default(ansible_user) }}"
+    group: "{{ instance_group | default(ansible_user) }}"
+    mode: '0644'
+  when:
+    - artifact_fetch_enabled | default(false)
+    - artifact_filename is defined
+

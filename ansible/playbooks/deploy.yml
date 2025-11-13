@@ -1,0 +1,43 @@
+---
+# Common deployment playbook
+# This playbook automatically determines which roles to run based on configuration
+
+- name: Deploy Neuron Application
+  hosts: all
+  become: yes
+  gather_facts: yes
+  
+  pre_tasks:
+    - name: Initialize artifact_enabled
+      set_fact:
+        artifact_enabled: false
+    
+    - name: Check if artifact role should be enabled (local source)
+      set_fact:
+        artifact_enabled: "{{ artifact_source.type == 'local' and artifact_source.local.domain is defined and artifact_source.local.domain | length > 0 and artifact_source.local.app_name is defined and artifact_source.local.app_name | length > 0 }}"
+      when: artifact_source is defined and artifact_source.type == 'local'
+    
+    - name: Check if artifact role should be enabled (nexus source)
+      set_fact:
+        artifact_enabled: "{{ artifact_source.type == 'nexus' and artifact_source.nexus.url is defined and artifact_source.nexus.group_id is defined and artifact_source.nexus.artifact_id is defined }}"
+      when: artifact_source is defined and artifact_source.type == 'nexus'
+    
+    - name: Check if cls role should be enabled
+      set_fact:
+        cls_enabled: "{{ neuron_features.cls is defined and neuron_features.cls | bool }}"
+    
+    - name: Build list of enabled roles
+      set_fact:
+        enabled_roles: "{{ (artifact_enabled | default(false) | ternary(['artifact'], []) | list) + (cls_enabled | default(false) | ternary(['cls'], []) | list) }}"
+    
+    - name: Display enabled roles
+      debug:
+        msg: "Enabled roles: {{ enabled_roles | default(['none']) | join(', ') }}"
+  
+  roles:
+    - role: artifact
+      when: artifact_enabled | default(false)
+    
+    - role: cls
+      when: cls_enabled | default(false)
+

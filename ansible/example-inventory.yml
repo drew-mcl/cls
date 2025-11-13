@@ -36,4 +36,27 @@ all:
       # Bedrock variables (BEDROCK_ prefix - kept in state.env)
       BEDROCK_CONFIG_PATH: "/etc/bedrock/config"
       BEDROCK_ENVIRONMENT: "production"
+      
+      # Artifact fetching configuration (optional - enables artifact role)
+      # Supports multiple artifact sources: "local" or "nexus"
+      
+      # Example 1: Local/runner artifact source (for local dev and GitLab CI)
+      artifact_source:
+        type: "local"
+        local:
+          domain: "me"      # Domain/org name (e.g., "me", "sor", "xyz")
+          app_name: "my-app"  # App name matching {domain}/apps/{app_name} structure
+      
+      # Example 2: Nexus artifact source (for production deployments)
+      # artifact_source:
+      #   type: "nexus"
+      #   nexus:
+      #     url: "https://nexus.example.com"
+      #     group_id: "com.example"
+      #     artifact_id: "my-app"
+      #     version: "{{ release_version }}"  # Can use release_version variable
+      #     repository: "maven-releases"
+      #     username: "{{ nexus_username }}"  # Optional
+      #     password: "{{ nexus_password }}"   # Optional, use vault
+      #     extension: "tgz"
 
