@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# Generated stop script for CLS Java application
+# Python 3.6 compatible lifecycle management
+
+import os
+import sys
+import time
+import signal
+import subprocess
+
+INSTANCE_DIR = "{{ instance_dir }}"
+RELEASE_DIR = os.path.join(INSTANCE_DIR, "current")
+RUN_DIR = os.path.join(RELEASE_DIR, "run")
+PID_FILE = os.path.join(RUN_DIR, "app.pid")
+
+# CLS directory - files from dist/cls/ in repo end up here in distribution
+CLS_DIR = os.path.join(RELEASE_DIR, "cls")
+HOOKS_DIR = os.path.join(CLS_DIR, "hooks.d")
+
+# Hook scripts
+PRE_STOP_HOOK = os.path.join(HOOKS_DIR, "pre-stop.sh") if os.path.exists(HOOKS_DIR) else None
+POST_STOP_HOOK = os.path.join(HOOKS_DIR, "post-stop.sh") if os.path.exists(HOOKS_DIR) else None
+
+def run_hook(hook_path, description):
+    """Run a bash hook script if it exists"""
+    if hook_path and os.path.exists(hook_path) and os.access(hook_path, os.X_OK):
+        print("Running {} hook: {}".format(description, hook_path))
+        result = subprocess.run(
+            ["bash", hook_path],
+            env=os.environ,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            universal_newlines=True
+        )
+        if result.returncode != 0:
+            print("Warning: {} hook exited with code {}".format(description, result.returncode))
+            print("Output: {}".format(result.stdout))
+            return False
+        return True
+    return True
+
+# Run pre-stop hook
+run_hook(PRE_STOP_HOOK, "pre-stop")
+
+# Check if PID file exists
+if not os.path.exists(PID_FILE):
+    print("PID file not found: {}".format(PID_FILE))
+    print("Application may not be running")
+    sys.exit(0)
+
+# Read PID
+try:
+    with open(PID_FILE, 'r') as f:
+        pid = int(f.read().strip())
+except (ValueError, IOError) as e:
+    print("Error reading PID file: {}".format(e))
+    sys.exit(1)
+
+# Check if process is running
+try:
+    os.kill(pid, 0)
+except OSError:
+    print("Process {} is not running".format(pid))
+    if os.path.exists(PID_FILE):
+        os.remove(PID_FILE)
+    sys.exit(0)
+
+# Stop the process gracefully
+print("Stopping application (PID: {})...".format(pid))
+
+# Try SIGTERM first
+try:
+    os.kill(pid, signal.SIGTERM)
+except OSError as e:
+    print("Error sending SIGTERM: {}".format(e))
+    sys.exit(1)
+
+# Wait for process to stop (max 30 seconds)
+timeout = 30
+elapsed = 0
+while elapsed < timeout:
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        # Process has stopped
+        print("Application stopped successfully")
+        if os.path.exists(PID_FILE):
+            os.remove(PID_FILE)
+        # Run post-stop hook
+        run_hook(POST_STOP_HOOK, "post-stop")
+        sys.exit(0)
+    time.sleep(1)
+    elapsed += 1
+
+# If still running, force kill
+try:
+    os.kill(pid, 0)
+    print("Application did not stop gracefully, forcing kill...")
+    os.kill(pid, signal.SIGKILL)
+    time.sleep(1)
+    
+    try:
+        os.kill(pid, 0)
+        print("Error: Failed to stop application")
+        sys.exit(1)
+    except OSError:
+        print("Application force stopped")
+        if os.path.exists(PID_FILE):
+            os.remove(PID_FILE)
+        # Run post-stop hook
+        run_hook(POST_STOP_HOOK, "post-stop")
+        sys.exit(0)
+except OSError:
+    # Process already stopped
+    if os.path.exists(PID_FILE):
+        os.remove(PID_FILE)
+    # Run post-stop hook
+    run_hook(POST_STOP_HOOK, "post-stop")
+    sys.exit(0)
+

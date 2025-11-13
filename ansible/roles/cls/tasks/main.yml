@@ -1,0 +1,287 @@
+---
+# Main tasks for cls role
+# This role generates lifecycle management scripts and configuration files for Java applications
+
+- name: Check if cls feature is enabled
+  set_fact:
+    cls_enabled: "{{ neuron_features.cls is defined and neuron_features.cls | bool }}"
+  when: neuron_features is defined
+
+- name: Validate required variables
+  fail:
+    msg: "{{ item }} is required but not defined"
+  when:
+    - cls_enabled | default(false)
+    - item is not defined or item == ""
+  loop:
+    - neuron_cls_java
+    - neuron_cls_java.main_class
+    - neuron_cls_java.java_home
+    - instance_id
+    - release_version
+
+- name: Pre-flight check - Validate Java home exists
+  stat:
+    path: "{{ neuron_cls_java.java_home }}"
+  register: java_home_stat
+  when: cls_enabled | default(false)
+
+- name: Pre-flight check - Fail if Java home does not exist
+  fail:
+    msg: "Java home directory does not exist: {{ neuron_cls_java.java_home }}"
+  when:
+    - cls_enabled | default(false)
+    - not java_home_stat.stat.exists
+
+- name: Pre-flight check - Validate Java executable exists
+  stat:
+    path: "{{ neuron_cls_java.java_home }}/bin/java"
+  register: java_exec_stat
+  when: cls_enabled | default(false)
+
+- name: Pre-flight check - Fail if Java executable does not exist
+  fail:
+    msg: "Java executable does not exist: {{ neuron_cls_java.java_home }}/bin/java"
+  when:
+    - cls_enabled | default(false)
+    - not java_exec_stat.stat.exists
+
+- name: Set release directory path
+  set_fact:
+    release_dir: "{{ instance_dir }}/release/{{ release_version }}"
+  when: cls_enabled | default(false)
+
+- name: Ensure instance directories exist
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ instance_user | default(ansible_user) }}"
+    group: "{{ instance_group | default(ansible_user) }}"
+    mode: '0755'
+  loop:
+    - "{{ instance_dir }}/run"
+    - "{{ instance_dir }}/data"
+    - "{{ instance_dir }}/log"
+    - "{{ instance_dir }}/scripts"
+    - "{{ release_dir }}"
+  when: cls_enabled | default(false)
+
+- name: Ensure release subdirectories exist
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ instance_user | default(ansible_user) }}"
+    group: "{{ instance_group | default(ansible_user) }}"
+    mode: '0755'
+  loop:
+    - "{{ release_dir }}/run"
+    - "{{ release_dir }}/scripts"
+  when: cls_enabled | default(false)
+
+- name: Initialize processed environment variables list
+  set_fact:
+    processed_env_vars: []
+  when: cls_enabled | default(false)
+
+- name: Collect and process ENVSTRIP_ variables (remove prefix)
+  set_fact:
+    processed_env_vars: "{{ processed_env_vars | default([]) + [item.key | regex_replace('^ENVSTRIP_', '') + '=' + item.value | string] }}"
+  loop: "{{ hostvars[inventory_hostname] | dict2items }}"
+  when:
+    - cls_enabled | default(false)
+    - item.key is match('^ENVSTRIP_')
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Collect and process ENV_ variables (keep prefix)
+  set_fact:
+    processed_env_vars: "{{ processed_env_vars | default([]) + [item.key + '=' + item.value | string] }}"
+  loop: "{{ hostvars[inventory_hostname] | dict2items }}"
+  when:
+    - cls_enabled | default(false)
+    - item.key is match('^ENV_')
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Collect and process BEDROCK_ variables (keep prefix)
+  set_fact:
+    processed_env_vars: "{{ processed_env_vars | default([]) + [item.key + '=' + item.value | string] }}"
+  loop: "{{ hostvars[inventory_hostname] | dict2items }}"
+  when:
+    - cls_enabled | default(false)
+    - item.key is match('^BEDROCK_')
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Generate state.env file in release directory
+  copy:
+    content: |
+      {% for var in processed_env_vars | default([]) | sort %}
+      {{ var }}
+      {% endfor %}
+    dest: "{{ release_dir }}/run/state.env"
+    owner: "{{ instance_user | default(ansible_user) }}"
+    group: "{{ instance_group | default(ansible_user) }}"
+    mode: '0644'
+  when: 
+    - cls_enabled | default(false)
+    - processed_env_vars is defined
+    - processed_env_vars | length > 0
+
+- name: Generate empty state.env file if no env vars
+  copy:
+    content: "# No environment variables configured\n"
+    dest: "{{ release_dir }}/run/state.env"
+    owner: "{{ instance_user | default(ansible_user) }}"
+    group: "{{ instance_group | default(ansible_user) }}"
+    mode: '0644'
+  when: 
+    - cls_enabled | default(false)
+    - processed_env_vars is defined
+    - processed_env_vars | length == 0
+
+- name: Generate jvm.args file
+  template:
+    src: jvm.args.j2
+    dest: "{{ release_dir }}/run/jvm.args"
+    owner: "{{ instance_user | default(ansible_user) }}"
+    group: "{{ instance_group | default(ansible_user) }}"
+    mode: '0644'
+  when: 
+    - cls_enabled | default(false)
+    - neuron_cls_java is defined
+
+- name: Check for custom scripts in cls/scripts directory (from distribution)
+  find:
+    paths: "{{ release_dir }}/cls/scripts"
+    patterns:
+      - "start.py"
+      - "stop.py"
+    recurse: no
+  register: custom_scripts
+  when: cls_enabled | default(false)
+  failed_when: false
+  changed_when: false
+
+- name: Set custom start script path
+  set_fact:
+    custom_start_script: "{{ custom_scripts.files | default([]) | selectattr('path', 'match', '.*start\\.py$') | list | first | default({}) | combine({}, recursive=True) }}"
+  when: 
+    - cls_enabled | default(false)
+    - custom_scripts.files is defined
+
+- name: Set custom stop script path
+  set_fact:
+    custom_stop_script: "{{ custom_scripts.files | default([]) | selectattr('path', 'match', '.*stop\\.py$') | list | first | default({}) | combine({}, recursive=True) }}"
+  when: 
+    - cls_enabled | default(false)
+    - custom_scripts.files is defined
+
+- name: Copy custom start script from dist if exists
+  copy:
+    src: "{{ custom_start_script.path }}"
+    dest: "{{ release_dir }}/scripts/start.py"
+    owner: "{{ instance_user | default(ansible_user) }}"
+    group: "{{ instance_group | default(ansible_user) }}"
+    mode: '0755'
+    remote_src: yes
+  when: 
+    - cls_enabled | default(false)
+    - custom_start_script.path is defined
+
+- name: Generate start script (Python) if custom doesn't exist
+  template:
+    src: start.py.j2
+    dest: "{{ release_dir }}/scripts/start.py"
+    owner: "{{ instance_user | default(ansible_user) }}"
+    group: "{{ instance_group | default(ansible_user) }}"
+    mode: '0755'
+  when: 
+    - cls_enabled | default(false)
+    - neuron_cls_java is defined
+    - custom_start_script.path is not defined
+
+- name: Copy custom stop script from dist if exists
+  copy:
+    src: "{{ custom_stop_script.path }}"
+    dest: "{{ release_dir }}/scripts/stop.py"
+    owner: "{{ instance_user | default(ansible_user) }}"
+    group: "{{ instance_group | default(ansible_user) }}"
+    mode: '0755'
+    remote_src: yes
+  when: 
+    - cls_enabled | default(false)
+    - custom_stop_script.path is defined
+
+- name: Generate stop script (Python) if custom doesn't exist
+  template:
+    src: stop.py.j2
+    dest: "{{ release_dir }}/scripts/stop.py"
+    owner: "{{ instance_user | default(ansible_user) }}"
+    group: "{{ instance_group | default(ansible_user) }}"
+    mode: '0755'
+  when: 
+    - cls_enabled | default(false)
+    - neuron_cls_java is defined
+    - custom_stop_script.path is not defined
+
+- name: Generate restart script
+  template:
+    src: restart.py.j2
+    dest: "{{ release_dir }}/scripts/restart.py"
+    owner: "{{ instance_user | default(ansible_user) }}"
+    group: "{{ instance_group | default(ansible_user) }}"
+    mode: '0755'
+  when: cls_enabled | default(false)
+
+- name: Generate start script (Bash) - optional fallback
+  template:
+    src: start.sh.j2
+    dest: "{{ release_dir }}/scripts/start.sh"
+    owner: "{{ instance_user | default(ansible_user) }}"
+    group: "{{ instance_group | default(ansible_user) }}"
+    mode: '0755'
+  when: 
+    - cls_enabled | default(false)
+    - neuron_cls_java is defined
+
+- name: Generate stop script (Bash) - optional fallback
+  template:
+    src: stop.sh.j2
+    dest: "{{ release_dir }}/scripts/stop.sh"
+    owner: "{{ instance_user | default(ansible_user) }}"
+    group: "{{ instance_group | default(ansible_user) }}"
+    mode: '0755'
+  when: 
+    - cls_enabled | default(false)
+    - neuron_cls_java is defined
+
+- name: Check if current symlink exists
+  stat:
+    path: "{{ instance_dir }}/current"
+  register: current_link
+  when: cls_enabled | default(false)
+
+- name: Create symlink from current to release (if not exists)
+  file:
+    src: "{{ release_dir }}"
+    dest: "{{ instance_dir }}/current"
+    state: link
+    owner: "{{ instance_user | default(ansible_user) }}"
+    group: "{{ instance_group | default(ansible_user) }}"
+  when: 
+    - cls_enabled | default(false)
+    - not current_link.stat.exists
+
+- name: Update symlink from current to release
+  file:
+    src: "{{ release_dir }}"
+    dest: "{{ instance_dir }}/current"
+    state: link
+    force: yes
+    owner: "{{ instance_user | default(ansible_user) }}"
+    group: "{{ instance_group | default(ansible_user) }}"
+  when: 
+    - cls_enabled | default(false)
+    - current_link.stat.exists
+

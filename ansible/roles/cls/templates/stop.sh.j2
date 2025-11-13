@@ -1,0 +1,65 @@
+#!/bin/bash
+# Generated stop script for CLS Java application
+# Python 3.6 compatible lifecycle management
+
+set -e
+
+INSTANCE_DIR="{{ instance_dir }}"
+RUN_DIR="{{ instance_dir }}/current/run"
+PID_FILE="${RUN_DIR}/app.pid"
+
+# Check if PID file exists
+if [ ! -f "${PID_FILE}" ]; then
+    echo "PID file not found: ${PID_FILE}"
+    echo "Application may not be running"
+    exit 0
+fi
+
+# Read PID
+PID=$(cat "${PID_FILE}")
+
+# Check if process is running
+if ! ps -p "${PID}" > /dev/null 2>&1; then
+    echo "Process ${PID} is not running"
+    rm -f "${PID_FILE}"
+    exit 0
+fi
+
+# Stop the process gracefully
+echo "Stopping application (PID: ${PID})..."
+
+# Try SIGTERM first
+kill -TERM "${PID}" || true
+
+# Wait for process to stop (max 30 seconds)
+TIMEOUT=30
+ELAPSED=0
+while [ ${ELAPSED} -lt ${TIMEOUT} ]; do
+    if ! ps -p "${PID}" > /dev/null 2>&1; then
+        echo "Application stopped successfully"
+        rm -f "${PID_FILE}"
+        exit 0
+    fi
+    sleep 1
+    ELAPSED=$((ELAPSED + 1))
+done
+
+# If still running, force kill
+if ps -p "${PID}" > /dev/null 2>&1; then
+    echo "Application did not stop gracefully, forcing kill..."
+    kill -KILL "${PID}" || true
+    sleep 1
+    
+    if ! ps -p "${PID}" > /dev/null 2>&1; then
+        echo "Application force stopped"
+        rm -f "${PID_FILE}"
+        exit 0
+    else
+        echo "Error: Failed to stop application"
+        exit 1
+    fi
+fi
+
+rm -f "${PID_FILE}"
+exit 0
+

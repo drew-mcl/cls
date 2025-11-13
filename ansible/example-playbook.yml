@@ -1,0 +1,13 @@
+---
+# Example playbook for using the CLS role
+# Usage: ansible-playbook -i inventory.yml example-playbook.yml
+
+- name: Deploy CLS Java Application
+  hosts: app_servers
+  become: yes
+  roles:
+    - role: cls
+      vars:
+        instance_id: "{{ instance_id | default('default-app') }}"
+        release_version: "{{ release_version | default('1.0.0') }}"
+

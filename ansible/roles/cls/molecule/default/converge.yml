@@ -1,0 +1,48 @@
+---
+- name: Converge
+  hosts: all
+  become: true
+  pre_tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: true
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+
+    - name: Install Python 3
+      package:
+        name: python3
+        state: present
+
+    - name: Install Java 8
+      package:
+        name:
+          - openjdk-8-jdk
+          - openjdk-8-jre
+        state: present
+
+    - name: Create test application structure
+      file:
+        path: "{{ item }}"
+        state: directory
+      loop:
+        - /home/team/app/instances/test-instance-001/release/1.0.0/lib
+        - /home/team/app/instances/test-instance-001/release/1.0.0/cls/hooks.d
+        - /home/team/app/instances/test-instance-001/release/1.0.0/cls/scripts
+
+    - name: Create test JAR file
+      file:
+        path: /home/team/app/instances/test-instance-001/release/1.0.0/lib/test.jar
+        state: touch
+
+    - name: Create test main class
+      file:
+        path: /home/team/app/instances/test-instance-001/release/1.0.0/lib/Main.class
+        state: touch
+
+  roles:
+    - role: cls
+      vars:
+        instance_id: "test-instance-001"
+        release_version: "1.0.0"
+

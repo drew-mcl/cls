@@ -1,0 +1,15 @@
+---
+# Ansible Lint configuration
+skip_list:
+  - 'yaml[line-length]'  # Allow longer lines in templates
+  - 'name[casing]'  # Allow various naming conventions
+exclude_paths:
+  - .github/
+  - molecule/
+  - tests/
+  - .git/
+use_default_rules: true
+rules:
+  line-length:
+    max: 120
+

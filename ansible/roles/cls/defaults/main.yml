@@ -1,0 +1,23 @@
+---
+# Default variables for cls role
+
+# Instance directory structure
+# instance_dir: "{{ ansible_env.HOME }}/team/app/instances/{{ instance_id }}"
+instance_dir: "/home/team/app/instances/{{ instance_id }}"
+
+# Release version (should be set in inventory or playbook)
+release_version: "1.0.0"
+
+# Instance user and group
+instance_user: null  # defaults to ansible_user
+instance_group: null  # defaults to ansible_user
+
+# Java configuration defaults
+neuron_cls_java:
+  main_class: null  # Required
+  param_class: null  # Optional
+  mem:
+    xs: "256m"
+    xm: "512m"
+  java_home: "{{ ansible_env.JAVA_HOME | default('/usr/lib/jvm/java-8-openjdk') }}"
+

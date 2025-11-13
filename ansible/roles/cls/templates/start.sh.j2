@@ -1,0 +1,86 @@
+#!/bin/bash
+# Generated start script for CLS Java application
+# Python 3.6 compatible lifecycle management
+
+set -e
+
+INSTANCE_DIR="{{ instance_dir }}"
+RELEASE_DIR="{{ instance_dir }}/current"
+RUN_DIR="${RELEASE_DIR}/run"
+SCRIPTS_DIR="${RELEASE_DIR}/scripts"
+LOG_DIR="{{ instance_dir }}/log"
+PID_FILE="${RUN_DIR}/app.pid"
+STATE_ENV="${RUN_DIR}/state.env"
+JVM_ARGS_FILE="${RUN_DIR}/jvm.args"
+
+# Source state.env if it exists
+if [ -f "${STATE_ENV}" ]; then
+    set -a
+    source "${STATE_ENV}"
+    set +a
+fi
+
+# Check if already running
+if [ -f "${PID_FILE}" ]; then
+    PID=$(cat "${PID_FILE}")
+    if ps -p "${PID}" > /dev/null 2>&1; then
+        echo "Application is already running with PID ${PID}"
+        exit 1
+    else
+        echo "Stale PID file found, removing..."
+        rm -f "${PID_FILE}"
+    fi
+fi
+
+# Validate required files
+if [ ! -f "${JVM_ARGS_FILE}" ]; then
+    echo "Error: JVM args file not found: ${JVM_ARGS_FILE}"
+    exit 1
+fi
+
+# Read JVM arguments
+JVM_ARGS=$(cat "${JVM_ARGS_FILE}")
+
+# Set Java home
+export JAVA_HOME="{{ neuron_cls_java.java_home }}"
+export PATH="${JAVA_HOME}/bin:${PATH}"
+
+# Build classpath (adjust as needed for your application)
+CLASSPATH="${RELEASE_DIR}/lib/*"
+
+# Main class
+MAIN_CLASS="{{ neuron_cls_java.main_class }}"
+
+# Param class (optional)
+{% if neuron_cls_java.param_class is defined and neuron_cls_java.param_class %}
+PARAM_CLASS="{{ neuron_cls_java.param_class }}"
+{% else %}
+PARAM_CLASS=""
+{% endif %}
+
+# Build command
+CMD="${JAVA_HOME}/bin/java ${JVM_ARGS} -cp ${CLASSPATH} ${MAIN_CLASS}"
+{% if neuron_cls_java.param_class is defined and neuron_cls_java.param_class %}
+CMD="${CMD} ${PARAM_CLASS}"
+{% endif %}
+
+# Start application
+echo "Starting application..."
+echo "Command: ${CMD}"
+nohup ${CMD} > "${LOG_DIR}/app.out" 2> "${LOG_DIR}/app.err" &
+APP_PID=$!
+
+# Save PID
+echo "${APP_PID}" > "${PID_FILE}"
+
+# Wait a moment and check if process is still running
+sleep 2
+if ps -p "${APP_PID}" > /dev/null 2>&1; then
+    echo "Application started successfully with PID ${APP_PID}"
+    exit 0
+else
+    echo "Error: Application failed to start"
+    rm -f "${PID_FILE}"
+    exit 1
+fi
+

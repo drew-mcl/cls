@@ -1,0 +1,39 @@
+---
+# Example inventory file for CLS role
+# This demonstrates how to configure the cls role in your Ansible inventory
+
+all:
+  hosts:
+    app-server-01:
+      # Enable CLS feature
+      neuron_features:
+        cls: true
+      
+      # Java application configuration
+      neuron_cls_java:
+        main_class: "com.example.MainClass"
+        param_class: "com.example.ParamClass"  # Optional
+        mem:
+          xs: "256m"   # Initial heap size
+          xm: "512m"   # Maximum heap size
+        java_home: "/usr/lib/jvm/java-8-openjdk"
+      
+      # Instance configuration
+      instance_id: "my-app-001"
+      instance_dir: "/home/team/app/instances/my-app-001"
+      release_version: "1.0.0"
+      instance_user: "appuser"
+      instance_group: "appgroup"
+      
+      # Environment variables (ENV_ prefix - kept in state.env)
+      ENV_DATABASE_URL: "postgresql://localhost:5432/mydb"
+      ENV_LOG_LEVEL: "INFO"
+      
+      # Environment variables (ENVSTRIP_ prefix - prefix removed in state.env)
+      ENVSTRIP_API_KEY: "secret-key-123"  # Will be stored as API_KEY=secret-key-123
+      ENVSTRIP_CONFIG_PATH: "/etc/app/config"  # Will be stored as CONFIG_PATH=/etc/app/config
+      
+      # Bedrock variables (BEDROCK_ prefix - kept in state.env)
+      BEDROCK_CONFIG_PATH: "/etc/bedrock/config"
+      BEDROCK_ENVIRONMENT: "production"
+

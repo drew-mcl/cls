@@ -1,0 +1,59 @@
+---
+# Alternative GitLab CI configuration using local Docker
+# Use this if you want to run GitLab CI locally with gitlab-runner
+
+stages:
+  - lint
+  - test
+  - validate
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  PYTHON_VERSION: "3.6"
+
+before_script:
+  - python3 --version
+  - pip3 install --upgrade pip
+  - pip3 install -r requirements-test.txt
+
+yamllint:
+  stage: lint
+  script:
+    - yamllint .
+  tags:
+    - local
+
+ansible-lint:
+  stage: lint
+  script:
+    - ansible-lint .
+  tags:
+    - local
+
+molecule-test:
+  stage: test
+  script:
+    - cd ansible/roles/cls
+    - molecule test
+  tags:
+    - local
+  needs:
+    - yamllint
+    - ansible-lint
+
+safety-tests:
+  stage: test
+  script:
+    - cd ansible/roles/cls
+    - python3 -m pytest tests/integration/test_safety.py -v
+  tags:
+    - local
+
+syntax-tests:
+  stage: validate
+  script:
+    - cd ansible/roles/cls
+    - python3 -m pytest tests/test_ansible_role.py -v
+  tags:
+    - local
+

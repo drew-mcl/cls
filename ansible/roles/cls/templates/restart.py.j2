@@ -1,0 +1,62 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# Generated restart script for CLS Java application
+# Python 3.6 compatible lifecycle management
+
+import os
+import sys
+import subprocess
+import time
+
+INSTANCE_DIR = "{{ instance_dir }}"
+RELEASE_DIR = os.path.join(INSTANCE_DIR, "current")
+SCRIPTS_DIR = os.path.join(RELEASE_DIR, "scripts")
+STOP_SCRIPT = os.path.join(SCRIPTS_DIR, "stop.py")
+START_SCRIPT = os.path.join(SCRIPTS_DIR, "start.py")
+
+def main():
+    print("=" * 60)
+    print("Restarting CLS Application")
+    print("=" * 60)
+    
+    # Check if scripts exist
+    if not os.path.exists(STOP_SCRIPT):
+        print("Error: Stop script not found: {}".format(STOP_SCRIPT))
+        sys.exit(1)
+    
+    if not os.path.exists(START_SCRIPT):
+        print("Error: Start script not found: {}".format(START_SCRIPT))
+        sys.exit(1)
+    
+    # Stop application
+    print("\nStep 1: Stopping application...")
+    print("-" * 60)
+    stop_result = subprocess.run([sys.executable, STOP_SCRIPT])
+    
+    if stop_result.returncode != 0:
+        print("\nWarning: Stop script exited with code {}".format(stop_result.returncode))
+        print("Continuing with restart anyway...")
+    else:
+        print("Application stopped successfully")
+    
+    # Wait a moment
+    print("\nWaiting 2 seconds before starting...")
+    time.sleep(2)
+    
+    # Start application
+    print("\nStep 2: Starting application...")
+    print("-" * 60)
+    start_result = subprocess.run([sys.executable, START_SCRIPT])
+    
+    if start_result.returncode != 0:
+        print("\nError: Start script exited with code {}".format(start_result.returncode))
+        sys.exit(1)
+    
+    print("\n" + "=" * 60)
+    print("Restart completed successfully")
+    print("=" * 60)
+    sys.exit(0)
+
+if __name__ == "__main__":
+    main()
+

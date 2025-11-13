@@ -1,0 +1,153 @@
+---
+# GitLab CI/CD configuration for CLS Ansible Role
+stages:
+  - lint
+  - test
+  - validate
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  MOLECULE_IMAGE: "quay.io/ansible/molecule:latest"
+  PYTHON_VERSION: "3.6"
+
+cache:
+  paths:
+    - .cache/pip
+    - .venv/
+
+before_script:
+  - python3 --version
+  - pip3 install --upgrade pip
+  - pip3 install -r requirements-test.txt
+
+# Lint stage
+yamllint:
+  stage: lint
+  image: python:3.6
+  script:
+    - yamllint .
+  only:
+    - merge_requests
+    - main
+    - develop
+
+ansible-lint:
+  stage: lint
+  image: python:3.6
+  script:
+    - ansible-lint .
+  only:
+    - merge_requests
+    - main
+    - develop
+
+# Test stage
+molecule-test:
+  stage: test
+  image: docker:latest
+  services:
+    - docker:dind
+  before_script:
+    - apk add --no-cache python3 py3-pip
+    - pip3 install --upgrade pip
+    - pip3 install molecule molecule-docker testinfra docker
+  script:
+    - cd ansible/roles/cls
+    - molecule test
+  only:
+    - merge_requests
+    - main
+    - develop
+  tags:
+    - docker
+
+molecule-test:default:
+  extends: molecule-test
+  script:
+    - cd ansible/roles/cls
+    - molecule test -s default
+
+# Safety tests
+safety-tests:
+  stage: test
+  image: python:3.6
+  script:
+    - cd ansible/roles/cls
+    - python3 -m pytest tests/integration/test_safety.py -v
+  only:
+    - merge_requests
+    - main
+    - develop
+
+# Syntax validation
+syntax-tests:
+  stage: validate
+  image: python:3.6
+  script:
+    - cd ansible/roles/cls
+    - python3 -m pytest tests/test_ansible_role.py -v
+  only:
+    - merge_requests
+    - main
+    - develop
+
+# Python script syntax check
+python-syntax:
+  stage: validate
+  image: python:3.6
+  script:
+    - |
+      cd ansible/roles/cls
+      for script in templates/*.py.j2; do
+        echo "Checking syntax of $script"
+        # Extract Python code and check syntax (basic check)
+        python3 -c "
+        import sys
+        import re
+        with open('$script', 'r') as f:
+            content = f.read()
+            # Remove Jinja2 template syntax for basic syntax check
+            content = re.sub(r'\{\{.*?\}\}', '', content)
+            content = re.sub(r'\{% .*? %\}', '', content)
+            compile(content, '$script', 'exec')
+        " || exit 1
+      done
+  only:
+    - merge_requests
+    - main
+    - develop
+
+# Full test suite (runs on main branch)
+full-test-suite:
+  stage: test
+  image: docker:latest
+  services:
+    - docker:dind
+  before_script:
+    - apk add --no-cache python3 py3-pip
+    - pip3 install --upgrade pip
+    - pip3 install -r requirements-test.txt
+  script:
+    - cd ansible/roles/cls
+    - echo "Running full test suite..."
+    - molecule test
+    - python3 -m pytest tests/ -v
+    - ansible-lint .
+    - yamllint .
+  only:
+    - main
+  tags:
+    - docker
+
+# Manual deployment test (optional)
+deploy-test:
+  stage: validate
+  image: python:3.6
+  script:
+    - echo "Manual deployment test - run manually when needed"
+    - echo "This job can be triggered manually for deployment validation"
+  when: manual
+  only:
+    - main
+  allow_failure: true
+

@@ -1,0 +1,43 @@
+---
+dependency:
+  name: galaxy
+driver:
+  name: docker
+platforms:
+  - name: instance
+    image: ubuntu:20.04
+    privileged: true
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    command: /lib/systemd/systemd
+    pre_build_image: true
+    tmpfs:
+      - /run
+      - /tmp
+provisioner:
+  name: ansible
+  inventory:
+    host_vars:
+      instance:
+        neuron_features:
+          cls: true
+        neuron_cls_java:
+          main_class: "com.example.TestMain"
+          param_class: "com.example.TestParam"
+          mem:
+            xs: "128m"
+            xm: "256m"
+          java_home: "/usr/lib/jvm/java-8-openjdk-amd64"
+        instance_id: "test-instance-001"
+        release_version: "1.0.0"
+        ENV_TEST_VAR: "test_value"
+        ENVSTRIP_SECRET: "secret123"
+        BEDROCK_CONFIG: "/etc/bedrock"
+  playbooks:
+    converge: ${MOLECULE_PLAYBOOK:-converge.yml}
+verifier:
+  name: testinfra
+  options:
+    v: 1
+

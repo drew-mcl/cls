@@ -1,0 +1,94 @@
+name: Test CLS Role
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.6'
+      
+      - name: Install dependencies
+        run: |
+          pip install ansible-lint yamllint
+      
+      - name: Run ansible-lint
+        run: ansible-lint .
+      
+      - name: Run yamllint
+        run: yamllint .
+
+  molecule:
+    name: Molecule Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        scenario:
+          - default
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.6'
+      
+      - name: Install dependencies
+        run: |
+          pip install molecule molecule-docker testinfra docker
+      
+      - name: Run molecule test
+        run: |
+          cd ansible/roles/cls
+          molecule test
+
+  safety:
+    name: Safety Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.6'
+      
+      - name: Install dependencies
+        run: |
+          pip install pytest
+      
+      - name: Run safety tests
+        run: |
+          cd ansible/roles/cls
+          python3 -m pytest tests/integration/test_safety.py -v
+
+  syntax:
+    name: Syntax Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.6'
+      
+      - name: Install dependencies
+        run: |
+          pip install pytest pyyaml
+      
+      - name: Run syntax tests
+        run: |
+          cd ansible/roles/cls
+          python3 -m pytest tests/test_ansible_role.py -v
+
