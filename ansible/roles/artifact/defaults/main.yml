@@ -1,12 +1,6 @@
 ---
 # Default variables for artifact role
 
-# Instance directory structure (should match cls role)
-instance_dir: "/home/team/app/instances/{{ instance_id }}"
-
-# Release version (should be set in inventory or playbook)
-release_version: "1.0.0"
-
 # Instance user and group
 instance_user: null  # defaults to ansible_user
 instance_group: null  # defaults to ansible_user
@@ -18,25 +12,25 @@ artifact_source:
   
   # Local/runner artifact configuration
   # Used for local development and GitLab CI runners
+  # app_name can come from neuron_config.app_name if not set here
   local:
     domain: null      # Required for local: domain/org name (e.g., "me", "sor", "xyz")
-    app_name: null    # Required for local: app name matching {domain}/apps/{app_name} structure
-    base_path: "{{ ansible_env.CI_PROJECT_DIR | default(playbook_dir | dirname | dirname | dirname) }}"
-    relative_path: "{{ artifact_source.local.domain }}/apps/{{ artifact_source.local.app_name }}/build/distribution"
+    app_name: null    # Optional: app name (falls back to neuron_config.app_name)
+    base_path: "{{ ansible_env.CI_PROJECT_DIR | default(ansible_env.PWD | default('/tmp')) }}"
+    relative_path: "{{ artifact_source.local.domain }}/apps/{{ artifact_source.local.app_name | default(neuron_config.app_name) }}/build/distribution"
   
   # Nexus artifact configuration
   # Uses community.general.maven_nexus module
   nexus:
     url: null           # Required for nexus: Nexus repository URL
-    group_id: null      # Required for nexus: Maven groupId
+    group_id: "com.neuron"  # Default groupId (can be overridden)
     artifact_id: null   # Required for nexus: Maven artifactId
-    version: null       # Required for nexus: Artifact version (can use release_version)
+    version: null       # Optional: Artifact version (defaults to release_version)
     repository: "maven-releases"  # Nexus repository name
-    username: null      # Optional: Nexus username
-    password: null      # Optional: Nexus password (use vault)
     extension: "tgz"    # Artifact extension (default: tgz)
     classifier: null   # Optional: Maven classifier
 
-# Artifact destination
-artifact_dest: "{{ instance_dir }}/release/{{ release_version }}/dist"
+# Artifact destination (uses _neuron_release_dir_path if available)
+# Will be set dynamically in tasks based on _neuron_release_dir_path
+artifact_dest: null
 

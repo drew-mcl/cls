@@ -1,6 +1,7 @@
 ---
 # Common deployment playbook
 # This playbook automatically determines which roles to run based on configuration
+# Uses production-ready configuration management
 
 - name: Deploy Neuron Application
   hosts: all
@@ -8,18 +9,76 @@
   gather_facts: yes
   
   pre_tasks:
+    # Load and merge configuration with proper precedence
+    # This handles deep merging of configuration objects (neuron_config, neuron_cls_java, etc.)
+    - name: Load Neuron configuration
+      neuron_config:
+        config_file: "{{ neuron_config_file | default(omit) }}"
+        set_vars: true
+        validate: true
+        cacheable: true
+      register: neuron_config_result
+      failed_when: neuron_config_result.failed | default(false)
+    
+    # Ensure configuration objects are properly merged and cached
+    # Ansible's variable precedence handles merging, but we ensure cacheability
+    - name: Cache neuron_cls_java configuration
+      set_fact:
+        neuron_cls_java: "{{ neuron_cls_java | default({}) }}"
+      cacheable: yes
+      when: neuron_cls_java is defined
+    
+    - name: Cache neuron_config configuration
+      set_fact:
+        neuron_config: "{{ neuron_config | default({}) }}"
+      cacheable: yes
+      when: neuron_config is defined
+    
+    - name: Cache artifact_source configuration
+      set_fact:
+        artifact_source: "{{ artifact_source | default({}) }}"
+      cacheable: yes
+      when: artifact_source is defined
+    
+    - name: Cache neuron_features configuration
+      set_fact:
+        neuron_features: "{{ neuron_features | default({}) }}"
+      cacheable: yes
+      when: neuron_features is defined
+    
+    # Path construction is handled by neuron_config action plugin
+    # It constructs paths based on neuron_config structure:
+    # - _neuron_deployment_root: env.Home/neuron_config.team/neuron_config.app/deployment_type
+    # - _neuron_release_dir_path: .../releases/version
+    # - _neuron_instance_dir: .../instances/NEURON_APP_INSTANCE_FQN
+    
+    # Backward compatibility: set instance_dir if not already set
+    - name: Set instance_dir for backward compatibility
+      set_fact:
+        instance_dir: "{{ _neuron_instance_dir }}"
+      when: instance_dir is not defined
+      cacheable: yes
+    
+    # Set neuron_deployment_root for backward compatibility
+    - name: Set neuron_deployment_root for backward compatibility
+      set_fact:
+        neuron_deployment_root: "{{ _neuron_deployment_root }}"
+      when: neuron_deployment_root is not defined
+      cacheable: yes
+    
+    # Determine enabled roles
     - name: Initialize artifact_enabled
       set_fact:
         artifact_enabled: false
     
     - name: Check if artifact role should be enabled (local source)
       set_fact:
-        artifact_enabled: "{{ artifact_source.type == 'local' and artifact_source.local.domain is defined and artifact_source.local.domain | length > 0 and artifact_source.local.app_name is defined and artifact_source.local.app_name | length > 0 }}"
+        artifact_enabled: "{{ artifact_source.type == 'local' and artifact_source.local.domain is defined and artifact_source.local.domain | length > 0 and (artifact_source.local.app_name is defined or neuron_config.app_name is defined) }}"
       when: artifact_source is defined and artifact_source.type == 'local'
     
     - name: Check if artifact role should be enabled (nexus source)
       set_fact:
-        artifact_enabled: "{{ artifact_source.type == 'nexus' and artifact_source.nexus.url is defined and artifact_source.nexus.group_id is defined and artifact_source.nexus.artifact_id is defined }}"
+        artifact_enabled: "{{ artifact_source.type == 'nexus' and artifact_source.nexus.url is defined and artifact_source.nexus.artifact_id is defined }}"
       when: artifact_source is defined and artifact_source.type == 'nexus'
     
     - name: Check if cls role should be enabled
@@ -30,9 +89,19 @@
       set_fact:
         enabled_roles: "{{ (artifact_enabled | default(false) | ternary(['artifact'], []) | list) + (cls_enabled | default(false) | ternary(['cls'], []) | list) }}"
     
-    - name: Display enabled roles
+    - name: Display configuration summary
       debug:
-        msg: "Enabled roles: {{ enabled_roles | default(['none']) | join(', ') }}"
+        msg:
+          - "=== Neuron Deployment Configuration ==="
+          - "Team: {{ neuron_team | default('not set') }}"
+          - "App: {{ neuron_app | default('not set') }}"
+          - "Deployment Type: {{ neuron_deployment_type | default('app') }}"
+          - "Instance FQN: {{ NEURON_APP_INSTANCE_FQN | default(instance_id) }}"
+          - "Release Version: {{ release_version | default('1.0.0') }}"
+          - "Deployment Root: {{ _neuron_deployment_root }}"
+          - "Instance Dir: {{ _neuron_instance_dir }}"
+          - "Release Dir: {{ _neuron_release_dir_path }}"
+          - "Enabled Roles: {{ enabled_roles | default(['none']) | join(', ') }}"
   
   roles:
     - role: artifact
@@ -40,4 +109,3 @@
     
     - role: cls
       when: cls_enabled | default(false)
-

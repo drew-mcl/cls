@@ -1,0 +1,49 @@
+---
+# Global defaults for all hosts
+# These can be overridden in environment-specific group_vars or host_vars
+
+# Deployment root configuration
+# Override this per environment (dev, staging, prod) in group_vars/{env}.yml
+neuron_deployment_root: "/home/team/app"
+neuron_instance_base: "instances"
+neuron_release_base: "release"
+
+# Default instance configuration
+instance_user: null  # Will default to ansible_user if not set
+instance_group: null  # Will default to ansible_user if not set
+
+# Default neuron_config (app-level configuration)
+# Used for path construction: env.Home/team/app/deployment_type/...
+neuron_config:
+  team: null      # Team name (e.g., "team", "engineering")
+  app: null       # App name (can also use app_name)
+  app_name: null  # Alternative to app, used by artifact role
+  deployment_type: "app"  # Options: "app", "tools", "artifacts" (default: "app")
+
+# Default artifact source configuration
+artifact_source:
+  type: "local"  # Options: "local", "nexus"
+  local:
+    domain: null
+    app_name: null  # Falls back to neuron_config.app_name
+  nexus:
+    url: null
+    group_id: "com.neuron"
+    artifact_id: null
+    repository: "maven-releases"
+    extension: "tgz"
+
+# Default CLS configuration
+neuron_features:
+  cls: false
+
+# Default CLS Java configuration
+# These defaults can be overridden at any level (group_vars, host_vars, playbook, extra_vars)
+# Use deep merge - only override the keys you want to change
+neuron_cls_java:
+  main_class: null  # Required when CLS is enabled
+  param_class: null  # Optional
+  mem:
+    xs: "256m"      # Can be overridden per environment
+    xm: "512m"      # Can be overridden per environment
+  java_home: "{{ ansible_env.JAVA_HOME | default('/usr/lib/jvm/java-8-openjdk') }}"

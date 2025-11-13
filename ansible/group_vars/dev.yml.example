@@ -1,0 +1,23 @@
+---
+# Development environment overrides
+# Copy this to group_vars/dev.yml and customize
+
+# Development deployment root
+neuron_deployment_root: "/home/dev/apps"
+
+# Development defaults
+instance_user: "{{ ansible_user }}"
+instance_group: "{{ ansible_user }}"
+
+# Development artifact source (local)
+artifact_source:
+  type: "local"
+  local:
+    domain: "me"  # Default domain for dev
+
+# Development CLS defaults
+neuron_cls_java:
+  mem:
+    xs: "128m"
+    xm: "512m"
+

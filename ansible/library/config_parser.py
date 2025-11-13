@@ -46,13 +46,15 @@ class ConfigParser:
         
         if source_type == 'local':
             local_config = artifact_source.get('local', {})
+            neuron_config = self.config.get('neuron_config', {})
+            # Domain is required, app_name can come from local config or neuron_config
             if (local_config.get('domain') and 
-                local_config.get('app_name')):
+                (local_config.get('app_name') or neuron_config.get('app_name'))):
                 self.enabled_roles.add('artifact')
         elif source_type == 'nexus':
             nexus_config = artifact_source.get('nexus', {})
+            # Only url and artifact_id are required, group_id has default
             if (nexus_config.get('url') and 
-                nexus_config.get('group_id') and 
                 nexus_config.get('artifact_id')):
                 self.enabled_roles.add('artifact')
     
@@ -83,12 +85,14 @@ class ConfigParser:
             
             if source_type == 'local':
                 local_config = artifact_source.get('local', {})
-                if not local_config.get('app_name'):
-                    validation['errors'].append('artifact role (local) requires artifact_source.local.app_name')
-                    validation['valid'] = False
+                neuron_config = self.config.get('neuron_config', {})
                 
                 if not local_config.get('domain'):
                     validation['errors'].append('artifact role (local) requires artifact_source.local.domain')
+                    validation['valid'] = False
+                
+                if not local_config.get('app_name') and not neuron_config.get('app_name'):
+                    validation['errors'].append('artifact role (local) requires artifact_source.local.app_name or neuron_config.app_name')
                     validation['valid'] = False
             
             elif source_type == 'nexus':
@@ -97,13 +101,11 @@ class ConfigParser:
                     validation['errors'].append('artifact role (nexus) requires artifact_source.nexus.url')
                     validation['valid'] = False
                 
-                if not nexus_config.get('group_id'):
-                    validation['errors'].append('artifact role (nexus) requires artifact_source.nexus.group_id')
-                    validation['valid'] = False
-                
                 if not nexus_config.get('artifact_id'):
                     validation['errors'].append('artifact role (nexus) requires artifact_source.nexus.artifact_id')
                     validation['valid'] = False
+                
+                # group_id has default, so no validation needed
             
             if not self.config.get('instance_id'):
                 validation['errors'].append('artifact role requires instance_id')

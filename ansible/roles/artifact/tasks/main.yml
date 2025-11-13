@@ -1,39 +1,83 @@
 ---
 # Main tasks for artifact role
 # This role fetches and extracts artifacts from various sources (local/runner or Nexus)
+# Supports deduplication: same artifact source only runs once per host
 
 - name: Validate artifact source configuration
   fail:
     msg: "artifact_source.type must be 'local' or 'nexus'"
   when: artifact_source.type not in ['local', 'nexus']
 
+- name: Determine app_name (from artifact_source.local.app_name or neuron_config.app_name)
+  set_fact:
+    artifact_app_name: "{{ artifact_source.local.app_name | default(neuron_config.app_name | default('')) }}"
+  when: artifact_source.type == 'local'
+
 - name: Check if artifact fetching is enabled (local)
   set_fact:
-    artifact_fetch_enabled: "{{ artifact_source.type == 'local' and artifact_source.local.domain is defined and artifact_source.local.domain | length > 0 and artifact_source.local.app_name is defined and artifact_source.local.app_name | length > 0 }}"
+    artifact_fetch_enabled: "{{ artifact_source.type == 'local' and artifact_source.local.domain is defined and artifact_source.local.domain | length > 0 and artifact_app_name is defined and artifact_app_name | length > 0 }}"
+  when: artifact_source.type == 'local'
 
 - name: Check if artifact fetching is enabled (nexus)
   set_fact:
-    artifact_fetch_enabled: "{{ artifact_source.type == 'nexus' and artifact_source.nexus.url is defined and artifact_source.nexus.group_id is defined and artifact_source.nexus.artifact_id is defined }}"
+    artifact_fetch_enabled: "{{ artifact_source.type == 'nexus' and artifact_source.nexus.url is defined and artifact_source.nexus.artifact_id is defined }}"
+  when: artifact_source.type == 'nexus'
 
 - name: Fail if artifact fetching is not properly configured
   fail:
     msg: "Artifact source configuration is incomplete. Check artifact_source.{{ artifact_source.type }} settings."
   when: not artifact_fetch_enabled | default(false)
 
-- name: Fail if required common variables are missing
-  fail:
-    msg: "{{ item }} is required for artifact fetching but not defined"
+- name: Set release directory path (use _neuron_release_dir_path if available)
+  set_fact:
+    release_dir: "{{ _neuron_release_dir_path | default(instance_dir | default('/tmp') + '/release/' + (release_version | default('1.0.0'))) }}"
+  when: artifact_fetch_enabled | default(false)
+
+- name: Set shared artifact destination path (per host, not per instance)
+  set_fact:
+    artifact_dest: "/tmp/neuron_artifacts/{{ artifact_key | replace('/', '_') | replace(':', '_') }}"
+  when: artifact_fetch_enabled | default(false)
+
+- name: Set Nexus group_id for artifact key (with default)
+  set_fact:
+    nexus_group_id_for_key: "{{ artifact_source.nexus.group_id | default('com.neuron') }}"
   when:
     - artifact_fetch_enabled | default(false)
-    - item is not defined or item == ""
-  loop:
-    - instance_id
-    - release_version
+    - artifact_source.type == 'nexus'
 
-- name: Set release directory path
+- name: Set Nexus version for artifact key
   set_fact:
-    release_dir: "{{ instance_dir }}/release/{{ release_version }}"
+    nexus_version_for_key: "{{ artifact_source.nexus.version | default(release_version | default('1.0.0')) }}"
+  when:
+    - artifact_fetch_enabled | default(false)
+    - artifact_source.type == 'nexus'
+
+- name: Create unique artifact key for deduplication
+  set_fact:
+    artifact_key: "{{ artifact_source.type }}_{{ artifact_source.local.domain | default('') }}_{{ artifact_app_name | default('') }}_{{ artifact_source.nexus.url | default('') }}_{{ nexus_group_id_for_key | default('') }}_{{ artifact_source.nexus.artifact_id | default('') }}_{{ nexus_version_for_key | default('') }}"
   when: artifact_fetch_enabled | default(false)
+
+- name: Initialize artifact cache on host
+  set_fact:
+    _artifact_cache: {}
+  when: hostvars[inventory_hostname]['_artifact_cache'] is not defined
+
+- name: Check if artifact already fetched for this source
+  set_fact:
+    artifact_already_fetched: "{{ hostvars[inventory_hostname]['_artifact_cache'][artifact_key] is defined }}"
+  when:
+    - artifact_fetch_enabled | default(false)
+    - artifact_key is defined
+    - hostvars[inventory_hostname]['_artifact_cache'][artifact_key] is defined
+  failed_when: false
+  changed_when: false
+
+- name: Set artifact_already_fetched to false if not cached
+  set_fact:
+    artifact_already_fetched: false
+  when:
+    - artifact_fetch_enabled | default(false)
+    - artifact_already_fetched is not defined
 
 - name: Ensure artifact destination directory exists
   file:
@@ -42,16 +86,20 @@
     owner: "{{ instance_user | default(ansible_user) }}"
     group: "{{ instance_group | default(ansible_user) }}"
     mode: '0755'
-  when: artifact_fetch_enabled | default(false)
+  when:
+    - artifact_fetch_enabled | default(false)
+    - not artifact_already_fetched | default(false)
 
 # Local/runner artifact fetching
 - name: Set local artifact source path
   set_fact:
-    artifact_source_path: "{{ artifact_source.local.base_path }}/{{ artifact_source.local.relative_path }}"
+    artifact_source_path: "{{ artifact_source.local.base_path }}/{{ artifact_source.local.domain }}/apps/{{ artifact_app_name }}/build/distribution"
   when:
     - artifact_fetch_enabled | default(false)
     - artifact_source.type == 'local'
+    - not artifact_already_fetched | default(false)
 
+# Local/runner artifact fetching
 - name: Find artifact .tgz file locally (local source)
   find:
     paths: "{{ artifact_source_path }}"
@@ -61,6 +109,7 @@
   when:
     - artifact_fetch_enabled | default(false)
     - artifact_source.type == 'local'
+    - not artifact_already_fetched | default(false)
     - ansible_env.CI_PROJECT_DIR is not defined
   failed_when: false
   changed_when: false
@@ -76,16 +125,18 @@
   when:
     - artifact_fetch_enabled | default(false)
     - artifact_source.type == 'local'
+    - not artifact_already_fetched | default(false)
     - ansible_env.CI_PROJECT_DIR is defined
   failed_when: false
   changed_when: false
 
 - name: Validate local artifact file found
   fail:
-    msg: "No .tgz artifact found in {{ artifact_source_path }}. Expected: {{ artifact_source.local.domain }}/apps/{{ artifact_source.local.app_name }}/build/distribution/*.tgz"
+    msg: "No .tgz artifact found in {{ artifact_source_path }}. Expected: {{ artifact_source.local.domain }}/apps/{{ artifact_app_name }}/build/distribution/*.tgz"
   when:
     - artifact_fetch_enabled | default(false)
     - artifact_source.type == 'local'
+    - not artifact_already_fetched | default(false)
     - artifact_files.files | default([]) | length == 0
 
 - name: Set local artifact file path
@@ -94,6 +145,7 @@
   when:
     - artifact_fetch_enabled | default(false)
     - artifact_source.type == 'local'
+    - not artifact_already_fetched | default(false)
     - artifact_files.files | default([]) | length > 0
 
 - name: Copy local artifact to release directory (local execution)
@@ -107,6 +159,7 @@
   when:
     - artifact_fetch_enabled | default(false)
     - artifact_source.type == 'local'
+    - not artifact_already_fetched | default(false)
     - artifact_file_path is defined
     - ansible_env.CI_PROJECT_DIR is not defined
 
@@ -121,6 +174,7 @@
   when:
     - artifact_fetch_enabled | default(false)
     - artifact_source.type == 'local'
+    - not artifact_already_fetched | default(false)
     - artifact_file_path is defined
     - ansible_env.CI_PROJECT_DIR is defined
 
@@ -130,25 +184,33 @@
   when:
     - artifact_fetch_enabled | default(false)
     - artifact_source.type == 'local'
+    - not artifact_already_fetched | default(false)
     - artifact_file_path is defined
 
 # Nexus artifact fetching
 - name: Set Nexus artifact version
   set_fact:
-    nexus_version: "{{ artifact_source.nexus.version | default(release_version) }}"
+    nexus_version: "{{ artifact_source.nexus.version | default(release_version | default('1.0.0')) }}"
   when:
     - artifact_fetch_enabled | default(false)
     - artifact_source.type == 'nexus'
+    - not artifact_already_fetched | default(false)
+
+- name: Set Nexus group_id (with default)
+  set_fact:
+    nexus_group_id: "{{ artifact_source.nexus.group_id | default('com.neuron') }}"
+  when:
+    - artifact_fetch_enabled | default(false)
+    - artifact_source.type == 'nexus'
+    - not artifact_already_fetched | default(false)
 
 - name: Download artifact from Nexus
   community.general.maven_nexus:
     url: "{{ artifact_source.nexus.url }}"
-    group_id: "{{ artifact_source.nexus.group_id }}"
+    group_id: "{{ nexus_group_id }}"
     artifact_id: "{{ artifact_source.nexus.artifact_id }}"
     version: "{{ nexus_version }}"
     repository: "{{ artifact_source.nexus.repository }}"
-    username: "{{ artifact_source.nexus.username | default(omit) }}"
-    password: "{{ artifact_source.nexus.password | default(omit) }}"
     extension: "{{ artifact_source.nexus.extension }}"
     classifier: "{{ artifact_source.nexus.classifier | default(omit) }}"
     dest: "{{ artifact_dest }}"
@@ -156,6 +218,7 @@
   when:
     - artifact_fetch_enabled | default(false)
     - artifact_source.type == 'nexus'
+    - not artifact_already_fetched | default(false)
 
 - name: Set Nexus artifact filename
   set_fact:
@@ -163,6 +226,7 @@
   when:
     - artifact_fetch_enabled | default(false)
     - artifact_source.type == 'nexus'
+    - not artifact_already_fetched | default(false)
     - nexus_download.file is defined
 
 # Common extraction tasks
@@ -172,14 +236,15 @@
     dest: "{{ release_dir }}"
     owner: "{{ instance_user | default(ansible_user) }}"
     group: "{{ instance_group | default(ansible_user) }}"
-    creates: "{{ release_dir }}/.artifact_extracted"
+    creates: "{{ release_dir }}/.artifact_extracted_{{ artifact_key }}"
   when:
     - artifact_fetch_enabled | default(false)
     - artifact_filename is defined
+    - not artifact_already_fetched | default(false)
 
 - name: Create artifact extraction marker
   file:
-    path: "{{ release_dir }}/.artifact_extracted"
+    path: "{{ release_dir }}/.artifact_extracted_{{ artifact_key }}"
     state: touch
     owner: "{{ instance_user | default(ansible_user) }}"
     group: "{{ instance_group | default(ansible_user) }}"
@@ -187,4 +252,20 @@
   when:
     - artifact_fetch_enabled | default(false)
     - artifact_filename is defined
+    - not artifact_already_fetched | default(false)
+
+- name: Mark artifact as fetched in cache
+  set_fact:
+    _artifact_cache: "{{ hostvars[inventory_hostname]['_artifact_cache'] | default({}) | combine({artifact_key: true}) }}"
+  when:
+    - artifact_fetch_enabled | default(false)
+    - artifact_filename is defined
+    - not artifact_already_fetched | default(false)
+
+- name: Skip artifact fetching (already fetched)
+  debug:
+    msg: "Skipping artifact fetch for {{ artifact_key }} - already fetched for this host"
+  when:
+    - artifact_fetch_enabled | default(false)
+    - artifact_already_fetched | default(false)
 

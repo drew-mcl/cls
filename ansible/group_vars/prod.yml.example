@@ -1,0 +1,31 @@
+---
+# Production environment overrides
+# Copy this to group_vars/prod.yml and customize
+# 
+# Note: Configuration objects are deep-merged, so you only need to override
+# the keys you want to change. The rest will come from group_vars/all.yml
+
+# Production deployment root
+neuron_deployment_root: "/opt/neuron/apps"
+
+# Production defaults
+instance_user: "neuron"
+instance_group: "neuron"
+
+# Production artifact source (Nexus)
+# Only override what's different from defaults
+artifact_source:
+  type: "nexus"
+  nexus:
+    url: "https://nexus.prod.example.com"
+    # group_id defaults to "com.neuron" from all.yml, no need to override
+    repository: "maven-releases"
+
+# Production CLS defaults
+# Only override memory settings, java_home will use default from all.yml
+neuron_cls_java:
+  mem:
+    xs: "512m"   # Override xs
+    xm: "2048m"  # Override xm
+  # java_home not specified, will use default from all.yml
+

@@ -1,0 +1,28 @@
+---
+# Configuration merging playbook
+# This playbook demonstrates how to properly merge configuration objects
+# Can be included in other playbooks or used standalone
+
+- name: Merge Neuron Configuration Objects
+  hosts: localhost
+  gather_facts: no
+  tasks:
+    # This task demonstrates deep merging of configuration objects
+    # In practice, this is handled by the neuron_config action plugin
+    
+    - name: Merge neuron_cls_java configuration
+      set_fact:
+        neuron_cls_java: "{{ neuron_cls_java | default({}) | combine(neuron_cls_java_override | default({}), recursive=True) }}"
+      vars:
+        neuron_cls_java_override:
+          mem:
+            xm: "1024m"  # Override only xm, keep xs from defaults
+    
+    - name: Merge neuron_features configuration
+      set_fact:
+        neuron_features: "{{ neuron_features | default({}) | combine(neuron_features_override | default({}), recursive=True) }}"
+    
+    - name: Merge artifact_source configuration
+      set_fact:
+        artifact_source: "{{ artifact_source | default({}) | combine(artifact_source_override | default({}), recursive=True) }}"
+
